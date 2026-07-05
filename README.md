@@ -1,4 +1,5 @@
-# collasa-collage-maker
+![logo](collasa.png) 
+# Collasa Collage Maker
 A lightweight web app remake of Google Picasa’s Collage Maker. Features many of the original options and manueverability in customizing the collage.
 
 I have long missed the simplicity of Picasa's collage maker and loved the results it provided. Picasa is very difficult to run now and is incredibly bloated, so I set out to create this.
