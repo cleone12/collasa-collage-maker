@@ -1,8 +1,6 @@
-![logo](collasa.png) 
-# Collasa Collage Maker
-A lightweight web app remake of Google Picasa’s Collage Maker. Features many of the original options and manueverability in customizing the collage.
+# <img src="collasa.png" width="32" alt="Logo"> Collasa Collage Maker 
 
-Anything you could do with Picasa's collage maker you should be able to do here.
+A lightweight web app remake of Google Picasa’s Collage Maker. All original features should be included plus some extra, with some modernized design updates.
 
 Background features:
 - Paper Texture Toggle
@@ -17,8 +15,6 @@ Photo Features:
 - Photos can be moved, resized, rotated, and layered with send to front and back options.
 
 Can export to PNG or JPG.
-
-Default skin looks close to Picasa's design language, however a modern dark mode is also included.
 
 |Aspect Ratio                  |Export size     |
 |------------------------|--------------------|
