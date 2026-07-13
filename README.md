@@ -24,5 +24,6 @@ Can export to PNG or JPG.
 |16:9 Widescreen         |3840×2160 (true UHD)|
 |3:4 Portrait            |3000×4000           |
 |2:3 Tall Portrait       |2664×3996           |
+|19.5:9 iPhone           |1846x4000           |
 
 Created using HTML and Claude.
