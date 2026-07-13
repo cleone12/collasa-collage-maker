@@ -22,6 +22,7 @@
     --text:#EDE7DC;
     --muted:#9A928A;
     --muted-2:#6E6864;
+    --cscale:1;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
@@ -103,12 +104,28 @@
     background:var(--accent);border:2px solid #fff;border-radius:50%;
     box-shadow:0 1px 4px rgba(0,0,0,.4);z-index:20;}
   .photo.selected .handle{display:flex;}
-  .handle-resize{width:15px;height:15px;right:-8px;bottom:-8px;cursor:nwse-resize;}
-  .handle-rotate{width:13px;height:13px;left:50%;top:-30px;margin-left:-6.5px;cursor:grab;}
-  .handle-rotate::before{content:"";position:absolute;left:50%;top:100%;width:1px;height:17px;
+  /* Handle geometry is expressed as constant-on-screen-px / --cscale, so handles render at
+     the same physical size no matter how zoomed out the canvas is (device, window size,
+     canvas resolution preset, etc). --cscale is kept in sync with the live canvas zoom level. */
+  .handle-resize{
+    width:calc(15px / var(--cscale, 1));height:calc(15px / var(--cscale, 1));
+    right:calc(-8px / var(--cscale, 1));bottom:calc(-8px / var(--cscale, 1));
+    border-width:calc(2px / var(--cscale, 1));cursor:nwse-resize;
+  }
+  .handle-rotate{
+    width:calc(13px / var(--cscale, 1));height:calc(13px / var(--cscale, 1));
+    left:50%;top:calc(-30px / var(--cscale, 1));margin-left:calc(-6.5px / var(--cscale, 1));
+    border-width:calc(2px / var(--cscale, 1));cursor:grab;
+  }
+  .handle-rotate::before{content:"";position:absolute;left:50%;top:100%;
+    width:calc(1px / var(--cscale, 1));height:calc(17px / var(--cscale, 1));
     background:rgba(255,255,255,.55);transform:translateX(-50%);}
-  .handle-delete{width:20px;height:20px;right:-10px;top:-10px;cursor:pointer;background:#3a3634;
-    border-color:#fff;font-size:12px;color:#fff;line-height:1;}
+  .handle-delete{
+    width:calc(20px / var(--cscale, 1));height:calc(20px / var(--cscale, 1));
+    right:calc(-10px / var(--cscale, 1));top:calc(-10px / var(--cscale, 1));
+    border-width:calc(2px / var(--cscale, 1));cursor:pointer;background:#3a3634;
+    border-color:#fff;font-size:calc(12px / var(--cscale, 1));color:#fff;line-height:1;
+  }
   .selection-outline{position:absolute;inset:0;border:1.5px dashed var(--accent);
     border-radius:2px;pointer-events:none;display:none;}
   .photo.selected .selection-outline{display:block;}
@@ -161,10 +178,25 @@
   .btn.danger:hover{background:rgba(193,85,46,.12);}
 
   /* ---------- Filmstrip ---------- */
-  #filmstrip{
-    flex:0 0 92px;position:relative;background:#100E0D;border-top:1px solid var(--control-border);
-    display:flex;align-items:center;gap:10px;padding:0 18px;overflow-x:auto;
+  #filmstripBar{
+    flex:0 0 92px;position:relative;transition:flex-basis .2s ease;
   }
+  #filmstripBar.collapsed{flex-basis:0;}
+  #filmstrip{
+    position:relative;height:100%;background:#100E0D;border-top:1px solid var(--control-border);
+    display:flex;align-items:center;gap:10px;padding:0 18px;overflow-x:auto;overflow-y:hidden;
+    transition:opacity .15s ease;
+  }
+  #filmstripBar.collapsed #filmstrip{opacity:0;pointer-events:none;}
+  .filmstrip-toggle{
+    position:absolute;top:-13px;left:50%;transform:translateX(-50%);
+    width:36px;height:13px;padding:0;border:1px solid var(--control-border);border-bottom:none;
+    border-radius:8px 8px 0 0;background:var(--control);color:var(--muted);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:6;
+  }
+  .filmstrip-toggle:hover{color:var(--text);background:var(--control-hover);}
+  .filmstrip-toggle svg{width:12px;height:12px;transition:transform .18s ease;}
+  #filmstripBar.collapsed .filmstrip-toggle svg{transform:rotate(180deg);}
   #filmstrip::before,#filmstrip::after{
     content:"";position:absolute;left:0;right:0;height:9px;pointer-events:none;
     background-image:radial-gradient(circle, #000 3px, transparent 3.6px);
@@ -260,41 +292,60 @@
   #app.theme-classic ::-webkit-scrollbar-thumb{background:#B0B0B0;}
 
 
-  /* ---------- Dark Mode override (the original skin), layered on top of Classic ---------- */
+  /* ---------- Dark Mode override (the original skin), layered on top of Classic ----------
+     Same gradient / inset-highlight / depth treatment as the Classic (light) skin, just
+     built from the dark palette so the two modes feel like matched surfaces, not a flat
+     recolor of one another. */
   #app.theme-dark{
     --bg:#171514; --panel:#201D1C; --control:#2A2725; --control-hover:#332F2D;
     --control-border:#3B3634; --accent:#3E7FC7; --accent-hover:#5A94D6;
     --accent-soft:rgba(62,127,199,0.18); --text:#EDE7DC; --muted:#9A928A; --muted-2:#6E6864;
-    background:var(--bg);
+    background:linear-gradient(to bottom, #1C1A19 0%, #121110 100%);
   }
-  #app.theme-dark #toolbar{background:var(--panel);border-bottom:1px solid var(--control-border);}
-  #app.theme-dark #inspector{background:var(--panel);border-right:1px solid var(--control-border);}
-  #app.theme-dark #filmstrip{background:#100E0D;border-top:1px solid var(--control-border);}
+  #app.theme-dark #toolbar{
+    background:linear-gradient(to bottom, #242120 0%, #1B1918 100%);border-bottom:1px solid var(--control-border);}
+  #app.theme-dark #inspector{
+    background:linear-gradient(to bottom, #221F1E 0%, #1B1918 100%);border-right:1px solid var(--control-border);}
+  #app.theme-dark #filmstrip{
+    background:linear-gradient(to bottom, #0D0B0A 0%, #100E0D 100%);border-top:1px solid var(--control-border);}
   #app.theme-dark #filmstrip::before,#app.theme-dark #filmstrip::after{
     background-image:radial-gradient(circle, #000 3px, transparent 3.6px);}
-  #app.theme-dark #canvas-outer{background:radial-gradient(ellipse at 50% 0%, #201D1C 0%, #171514 60%);}
-  #app.theme-dark .btn{background:var(--control);border:1px solid var(--control-border);
-    color:var(--text);box-shadow:none;border-radius:8px;}
-  #app.theme-dark .btn:hover{background:var(--control-hover);}
+  #app.theme-dark #canvas-outer{background:radial-gradient(ellipse at 50% 0%, #201D1C 0%, #14120f 60%);}
+  #app.theme-dark .btn{
+    background:linear-gradient(to bottom, #322E2C 0%, #201D1C 100%);border:1px solid #423C39;
+    color:var(--text);box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 1px 2px rgba(0,0,0,.35);
+    border-radius:8px;}
+  #app.theme-dark .btn:hover{background:linear-gradient(to bottom, #3A3532 0%, #282422 100%);}
   #app.theme-dark .btn.primary,#app.theme-dark .btn.primary:hover{
-    background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:none;}
-  #app.theme-dark .btn.primary:hover{background:var(--accent-hover);}
-  #app.theme-dark .btn.danger{background:transparent;border-color:#5a3327;color:#E38868;}
+    background:linear-gradient(to bottom, var(--accent-hover) 0%, var(--accent) 100%);
+    border:1px solid var(--accent);color:#fff;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.18), 0 1px 2px rgba(0,0,0,.4);}
+  #app.theme-dark .btn.primary:hover{filter:brightness(1.08);}
+  #app.theme-dark .btn.danger{background:linear-gradient(to bottom,#2B211D 0%,#241C19 100%);
+    border-color:#5a3327;color:#E38868;box-shadow:inset 0 1px 0 rgba(255,255,255,.03);}
   #app.theme-dark .btn:disabled{opacity:.5;}
   #app.theme-dark .segmented,#app.theme-dark .format-toggle{
-    background:var(--control);border:1px solid var(--control-border);box-shadow:none;}
+    background:linear-gradient(to bottom, #1C1A19 0%, #232020 100%);border:1px solid var(--control-border);
+    box-shadow:inset 0 1px 3px rgba(0,0,0,.35);}
   #app.theme-dark .segmented button,#app.theme-dark .format-toggle button{color:var(--muted);}
   #app.theme-dark .segmented button.active,#app.theme-dark .format-toggle button.active{
-    background:var(--accent);color:#fff;}
-  #app.theme-dark select{background:var(--control);border:1px solid var(--control-border);
-    color:var(--text);box-shadow:none;}
+    background:linear-gradient(to bottom, var(--accent-hover) 0%, var(--accent) 100%);color:#fff;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.15), 0 1px 2px rgba(0,0,0,.3);}
+  #app.theme-dark select{
+    background:linear-gradient(to bottom, #2A2725 0%, #221F1E 100%);border:1px solid var(--control-border);
+    color:var(--text);box-shadow:inset 0 1px 2px rgba(0,0,0,.3);}
   #app.theme-dark input[type=range]{background:var(--control-border);}
-  #app.theme-dark input[type=range]::-webkit-slider-thumb{background:var(--accent);border:2px solid #171514;}
+  #app.theme-dark input[type=range]::-webkit-slider-thumb{background:var(--accent);border:2px solid #171514;
+    box-shadow:0 1px 3px rgba(0,0,0,.4);}
   #app.theme-dark .brand{color:var(--text);}
   #app.theme-dark .brand svg{color:var(--accent);}
-  #app.theme-dark .modal-box{background:var(--panel);border-color:var(--control-border);color:var(--text);}
+  #app.theme-dark .modal-box{background:linear-gradient(to bottom, #242120 0%, #1A1817 100%);
+    border-color:var(--control-border);color:var(--text);
+    box-shadow:0 30px 70px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.04);}
   #app.theme-dark .modal-img-wrap{background:#000;}
-  #app.theme-dark .film-thumb{border-color:transparent;}
+  #app.theme-dark .film-thumb{border-color:transparent;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  #app.theme-dark .filmstrip-toggle{
+    background:linear-gradient(to bottom, #322E2C 0%, #201D1C 100%);border-color:#423C39;}
   #app.theme-dark ::-webkit-scrollbar-thumb{background:#3a3634;}
 </style>
 </head>
@@ -340,7 +391,12 @@
     <aside id="inspector"></aside>
   </main>
 
-  <div id="filmstrip"></div>
+  <div id="filmstripBar">
+    <button id="filmstripToggle" class="filmstrip-toggle" type="button" title="Hide film strip" aria-expanded="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div id="filmstrip"></div>
+  </div>
 
 </div>
 
@@ -355,6 +411,17 @@
     <div class="modal-actions">
       <button class="btn" id="modalCloseBtn" type="button">Close</button>
       <a class="btn primary" id="modalDownloadLink" download>Download</a>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal-box">
+    <h3 id="confirmTitle">Are you sure?</h3>
+    <p class="modal-hint" id="confirmMessage"></p>
+    <div class="modal-actions">
+      <button class="btn" id="confirmCancelBtn" type="button">Cancel</button>
+      <button class="btn primary" id="confirmOkBtn" type="button">Yes, continue</button>
     </div>
   </div>
 </div>
@@ -396,6 +463,7 @@
     topZ: 1,
     scale: 1,
     nextId: 1,
+    manualEdit: false,   // true once the user has dragged/resized/rotated a photo since the last arrange
   };
 
   // ---------------- DOM refs ----------------
@@ -417,6 +485,12 @@
   const exportPreviewImg = document.getElementById("exportPreviewImg");
   const modalDownloadLink = document.getElementById("modalDownloadLink");
   const modalCloseBtn = document.getElementById("modalCloseBtn");
+  const confirmModal = document.getElementById("confirmModal");
+  const confirmMessage = document.getElementById("confirmMessage");
+  const confirmCancelBtn = document.getElementById("confirmCancelBtn");
+  const confirmOkBtn = document.getElementById("confirmOkBtn");
+  const filmstripBar = document.getElementById("filmstripBar");
+  const filmstripToggle = document.getElementById("filmstripToggle");
 
   // ---------------- Helpers ----------------
   function uid(){ return "p" + (state.nextId++); }
@@ -425,7 +499,77 @@
 
   function findPhoto(id){ return state.photos.find(p => p.id === id); }
 
+  // ---- Border-aware sizing ----
+  // CSS padding percentages (top/bottom included) are always resolved against the
+  // *width* of the box, per spec. contentWFrac is the fraction of box width left after
+  // left+right padding; vertPadFrac is the total top+bottom padding as a fraction of width.
+  // Given those, we solve for the box height that makes the visible (post-padding) content
+  // area match the photo's own aspect ratio, so "cover" doesn't have to crop anything away.
+  const BORDER_GEOM = {
+    none:     {contentWFrac:1,    vertPadFrac:0},
+    print:    {contentWFrac:0.92, vertPadFrac:0.08},
+    polaroid: {contentWFrac:0.91, vertPadFrac:0.195},
+  };
+  function boxHeightForWidth(w, ar, border){
+    const g = BORDER_GEOM[border] || BORDER_GEOM.none;
+    return w * (g.vertPadFrac + g.contentWFrac / ar);
+  }
+  function boxSizeForCell(cellW, cellH, ar, border){
+    const g = BORDER_GEOM[border] || BORDER_GEOM.none;
+    let w = cellW;
+    let h = w * (g.vertPadFrac + g.contentWFrac / ar);
+    if(h > cellH){
+      h = cellH;
+      w = h / (g.vertPadFrac + g.contentWFrac / ar);
+    }
+    return {w:w, h:h};
+  }
+
   function bringToFront(p){ p.z = ++state.topZ; }
+
+  // ---- Cookies (remember filmstrip position, export mode, theme) ----
+  function setCookie(name, value, days){
+    const maxAge = days * 24 * 60 * 60;
+    document.cookie = name + "=" + encodeURIComponent(value) + ";max-age=" + maxAge + ";path=/;SameSite=Lax";
+  }
+  function getCookie(name){
+    const escaped = name.replace(/[-.$?*|{}()\[\]\\\/\+^]/g, "\\$&");
+    const match = document.cookie.match(new RegExp("(?:^|; )" + escaped + "=([^;]*)"));
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  // ---- Confirm dialog (used before actions that discard manual canvas edits) ----
+  let pendingConfirmAction = null;
+  function askConfirm(message, onConfirm){
+    confirmMessage.textContent = message;
+    pendingConfirmAction = onConfirm;
+    confirmModal.classList.add("show");
+  }
+  function closeConfirm(){
+    confirmModal.classList.remove("show");
+    pendingConfirmAction = null;
+  }
+  confirmCancelBtn.addEventListener("click", closeConfirm);
+  confirmModal.addEventListener("click", function(e){ if(e.target === confirmModal) closeConfirm(); });
+  confirmOkBtn.addEventListener("click", function(){
+    const fn = pendingConfirmAction;
+    closeConfirm();
+    if(fn) fn();
+  });
+
+  // Runs `action` immediately unless the user has made manual edits since the last
+  // arrange, in which case it confirms first. Repeated shuffles in a row don't re-prompt,
+  // because arrangeCurrent() clears manualEdit as soon as an arrange actually runs.
+  function guardArrangeChange(action){
+    if(state.manualEdit){
+      askConfirm(
+        "You've manually moved, resized, or rotated photos on the canvas. This will reset those changes. Continue?",
+        action
+      );
+    } else {
+      action();
+    }
+  }
 
   function applyCanvasBoxStyle(){
     if(state.backgroundMode === "image" && state.backgroundImage){
@@ -457,6 +601,7 @@
     canvasEl.style.width = state.canvasW + "px";
     canvasEl.style.height = state.canvasH + "px";
     canvasEl.style.transform = "scale(" + state.scale + ")";
+    canvasEl.style.setProperty("--cscale", state.scale);
   }
 
   function clientToCanvas(clientX, clientY){
@@ -481,9 +626,8 @@
       const cellCx = pad + col * (cellW + pad) + cellW / 2;
       const cellCy = pad + row * (cellH + pad) + cellH / 2;
       const ar = p.naturalW / p.naturalH;
-      let w = cellW, h = cellW / ar;
-      if(h > cellH){ h = cellH; w = cellH * ar; }
-      p.w = w; p.h = h; p.cx = cellCx; p.cy = cellCy; p.rot = 0;
+      const sized = boxSizeForCell(cellW, cellH, ar, p.border);
+      p.w = sized.w; p.h = sized.h; p.cx = cellCx; p.cy = cellCy; p.rot = 0;
       p.z = i + 1;
     });
     state.topZ = n + 1;
@@ -506,7 +650,7 @@ function arrangePile() {
     const ar = p.naturalW / p.naturalH;
     const jitter = 1 + (Math.random() - 0.5) * 0.3 * state.randomness;
     const w = baseSize * jitter;
-    const h = w / ar;
+    const h = boxHeightForWidth(w, ar, p.border);
 
     let attempts = 0;
     let placed = false;
@@ -579,6 +723,7 @@ function arrangePile() {
 
   function arrangeCurrent(){
     if(state.mode === "grid") arrangeGrid(); else arrangePile();
+    state.manualEdit = false;
   }
 
   // ---------------- Rendering ----------------
@@ -667,7 +812,7 @@ function arrangePile() {
       p.cx = start.cx + (cur.x - start.x);
       p.cy = start.cy + (cur.y - start.y);
       positionPhotoEl(el, p);
-    }));
+    }, function(){ state.manualEdit = true; }));
     let start = {};
     frame.addEventListener("pointerdown", function(ev){
       selectPhoto(p.id);
@@ -693,7 +838,7 @@ function arrangePile() {
       p.w = rstart.w * scaleF;
       p.h = rstart.h * scaleF;
       positionPhotoEl(el, p);
-    }, function(){ renderInspector(); }));
+    }, function(){ state.manualEdit = true; renderInspector(); }));
     let rstart = {};
     resizeH.addEventListener("pointerdown", function(){
       rstart = {w:p.w, h:p.h, hw:p.w/2, hh:p.h/2};
@@ -706,7 +851,7 @@ function arrangePile() {
       const dx = c.x - p.cx, dy = c.y - p.cy;
       p.rot = Math.round((Math.atan2(dy, dx) * 180 / Math.PI + 90) * 10) / 10;
       positionPhotoEl(el, p);
-    }, function(){ renderInspector(); }));
+    }, function(){ state.manualEdit = true; renderInspector(); }));
     rotateH.addEventListener("pointerdown", function(){ selectPhoto(p.id); });
 
     // Delete
@@ -775,13 +920,14 @@ function arrangePile() {
       reader.onload = function(e){
         const img = new Image();
         img.onload = function(){
+          const ar = img.naturalWidth / img.naturalHeight;
           resolve({
             id: uid(),
             src: e.target.result,
             naturalW: img.naturalWidth,
             naturalH: img.naturalHeight,
             cx: state.canvasW/2, cy: state.canvasH/2,
-            w: 300, h: 300 * (img.naturalHeight/img.naturalWidth),
+            w: 300, h: boxHeightForWidth(300, ar, state.defaultBorder),
             rot: 0, z: ++state.topZ,
             border: state.defaultBorder,
             shadow: state.defaultShadow,
@@ -817,14 +963,27 @@ function arrangePile() {
 
   themeToggleBtn.addEventListener("click", function(){
     appEl.classList.toggle("theme-dark");
-    themeToggleBtn.classList.toggle("primary", appEl.classList.contains("theme-dark"));
+    const isDark = appEl.classList.contains("theme-dark");
+    themeToggleBtn.classList.toggle("primary", isDark);
+    setCookie("collasa_theme", isDark ? "dark" : "classic", 365);
   });
 
   formatToggle.querySelectorAll(".fmt-btn").forEach(function(btn){
     btn.addEventListener("click", function(){
       state.exportFormat = btn.dataset.fmt;
       formatToggle.querySelectorAll(".fmt-btn").forEach(b => b.classList.toggle("active", b === btn));
+      setCookie("collasa_export_format", state.exportFormat, 365);
     });
+  });
+
+  function setFilmstripCollapsed(collapsed, save){
+    filmstripBar.classList.toggle("collapsed", collapsed);
+    filmstripToggle.title = collapsed ? "Show film strip" : "Hide film strip";
+    filmstripToggle.setAttribute("aria-expanded", String(!collapsed));
+    if(save !== false) setCookie("collasa_filmstrip_collapsed", collapsed ? "1" : "0", 365);
+  }
+  filmstripToggle.addEventListener("click", function(){
+    setFilmstripCollapsed(!filmstripBar.classList.contains("collapsed"));
   });
 
   ["dragover","dragenter"].forEach(evt => {
@@ -868,14 +1027,18 @@ function arrangePile() {
     const seg = el("div", "segmented");
     ["grid","pile"].forEach(m => {
       const b = el("button", m === state.mode ? "active" : "", m === "grid" ? "Grid" : "Pile");
-      b.addEventListener("click", () => { state.mode = m; arrangeCurrent(); renderAll(); });
+      b.addEventListener("click", () => {
+        guardArrangeChange(() => { state.mode = m; arrangeCurrent(); renderAll(); });
+      });
       seg.appendChild(b);
     });
     sec.appendChild(seg);
 
     const rearrangeBtn = el("button", "btn primary full-btn",
       state.mode === "grid" ? "Rearrange" : "Shuffle");
-    rearrangeBtn.addEventListener("click", () => { arrangeCurrent(); renderPhotos(); });
+    rearrangeBtn.addEventListener("click", () => {
+      guardArrangeChange(() => { arrangeCurrent(); renderPhotos(); });
+    });
     sec.appendChild(rearrangeBtn);
     container.appendChild(sec);
 
@@ -1018,7 +1181,10 @@ function arrangePile() {
     const applyAllBtn = el("button", "btn full-btn", "Apply to all photos");
     applyAllBtn.style.marginTop = "12px";
     applyAllBtn.addEventListener("click", () => {
-      state.photos.forEach(p => { p.border = state.defaultBorder; p.shadow = state.defaultShadow; });
+      state.photos.forEach(p => {
+        p.border = state.defaultBorder; p.shadow = state.defaultShadow;
+        p.h = boxHeightForWidth(p.w, p.naturalW / p.naturalH, p.border);
+      });
       renderPhotos();
     });
     sec.appendChild(applyAllBtn);
@@ -1050,7 +1216,11 @@ function arrangePile() {
     [["print","Print (thin border)"],["polaroid","Polaroid"],["none","None"]].forEach(([v,l]) => {
       const o = el("option","",l); o.value=v; if(v===p.border) o.selected=true; borderSel.appendChild(o);
     });
-    borderSel.addEventListener("change", () => { p.border = borderSel.value; renderPhotos(); });
+    borderSel.addEventListener("change", () => {
+      p.border = borderSel.value;
+      p.h = boxHeightForWidth(p.w, p.naturalW / p.naturalH, p.border);
+      renderPhotos();
+    });
     sec.appendChild(borderSel);
     container.appendChild(sec);
 
@@ -1286,7 +1456,30 @@ function arrangePile() {
     document.documentElement.style.setProperty("--app-height", window.innerHeight + "px");
   }
 
+  function loadPrefsFromCookies(){
+    const theme = getCookie("collasa_theme");
+    if(theme === "dark"){
+      appEl.classList.remove("theme-classic");
+      appEl.classList.add("theme-dark");
+      themeToggleBtn.classList.add("primary");
+    } else if(theme === "classic"){
+      appEl.classList.remove("theme-dark");
+      appEl.classList.add("theme-classic");
+    }
+
+    const fmt = getCookie("collasa_export_format");
+    if(fmt === "jpg" || fmt === "png"){
+      state.exportFormat = fmt;
+      formatToggle.querySelectorAll(".fmt-btn").forEach(b => b.classList.toggle("active", b.dataset.fmt === fmt));
+    }
+
+    if(getCookie("collasa_filmstrip_collapsed") === "1"){
+      setFilmstripCollapsed(true, false);
+    }
+  }
+
   function init(){
+    loadPrefsFromCookies();
     updateAppHeight();
     updateScale();
     renderAll();
