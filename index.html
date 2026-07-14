@@ -98,6 +98,11 @@
   .shadow-soft{box-shadow:0 15px 40px rgba(0,0,0,.20);}
   .shadow-medium{box-shadow:0 30px 70px rgba(0,0,0,.32);}
   .shadow-strong{box-shadow:0 50px 105px rgba(0,0,0,.46);}
+  /* Hard/crisp variant of each size: less blur relative to offset, a touch more opacity,
+     giving a punchier cut-out look instead of the soft/diffuse default. */
+  .shadowstyle-hard.shadow-soft{box-shadow:0 10px 8px rgba(0,0,0,.30);}
+  .shadowstyle-hard.shadow-medium{box-shadow:0 18px 13px rgba(0,0,0,.40);}
+  .shadowstyle-hard.shadow-strong{box-shadow:0 28px 19px rgba(0,0,0,.50);}
   .photo.lifted{z-index:9998 !important;}
   .photo.lifted .frame{box-shadow:0 85px 150px rgba(0,0,0,.5) !important;transform:scale(1.015);}
   .frame{transition:box-shadow .15s;}
@@ -464,6 +469,7 @@
     randomness: 0.5,
     defaultBorder: "print",
     defaultShadow: "medium",
+    defaultShadowStyle: "soft", // "soft" (diffuse) or "hard" (crisp-edged), independent of size
     topZ: 1,
     scale: 1,
     nextId: 1,
@@ -934,7 +940,8 @@ function arrangePile() {
       positionPhotoEl(el, p);
 
       const frame = document.createElement("div");
-      frame.className = "frame border-" + p.border + " shadow-" + p.shadow;
+      frame.className = "frame border-" + p.border + " shadow-" + p.shadow +
+        (p.shadowStyle === "hard" ? " shadowstyle-hard" : "");
       const img = document.createElement("img");
       img.src = p.src;
       img.draggable = false;
@@ -1190,6 +1197,7 @@ function arrangePile() {
             rot: 0, z: ++state.topZ,
             border: state.defaultBorder,
             shadow: state.defaultShadow,
+            shadowStyle: state.defaultShadowStyle,
             gridSpan: 1,
           });
         };
@@ -1441,7 +1449,7 @@ function arrangePile() {
     borderSel.addEventListener("change", () => { state.defaultBorder = borderSel.value; });
     sec.appendChild(borderSel);
 
-    const shadowRow = el("div","row"); shadowRow.style.marginTop="10px"; shadowRow.appendChild(el("label","","Shadow"));
+    const shadowRow = el("div","row"); shadowRow.style.marginTop="10px"; shadowRow.appendChild(el("label","","Shadow Size"));
     sec.appendChild(shadowRow);
     const shadowSel = el("select");
     [["soft","Soft"],["medium","Medium"],["strong","Strong"]].forEach(([v,l]) => {
@@ -1450,11 +1458,20 @@ function arrangePile() {
     shadowSel.addEventListener("change", () => { state.defaultShadow = shadowSel.value; });
     sec.appendChild(shadowSel);
 
+    const shadowStyleRow = el("div","row"); shadowStyleRow.style.marginTop="10px"; shadowStyleRow.appendChild(el("label","","Shadow Style"));
+    sec.appendChild(shadowStyleRow);
+    const shadowStyleSel = el("select");
+    [["soft","Soft"],["hard","Hard"]].forEach(([v,l]) => {
+      const o = el("option","",l); o.value=v; if(v===state.defaultShadowStyle) o.selected=true; shadowStyleSel.appendChild(o);
+    });
+    shadowStyleSel.addEventListener("change", () => { state.defaultShadowStyle = shadowStyleSel.value; });
+    sec.appendChild(shadowStyleSel);
+
     const applyAllBtn = el("button", "btn full-btn", "Apply to all photos");
     applyAllBtn.style.marginTop = "12px";
     applyAllBtn.addEventListener("click", () => {
       state.photos.forEach(p => {
-        p.border = state.defaultBorder; p.shadow = state.defaultShadow;
+        p.border = state.defaultBorder; p.shadow = state.defaultShadow; p.shadowStyle = state.defaultShadowStyle;
         p.h = boxHeightForWidth(p.w, p.naturalW / p.naturalH, p.border);
       });
       renderPhotos();
@@ -1518,6 +1535,12 @@ function arrangePile() {
     });
     shadowSel.addEventListener("change", () => { p.shadow = shadowSel.value; renderPhotos(); });
     sec.appendChild(shadowSel);
+    const shadowStyleSel = el("select"); shadowStyleSel.style.marginTop = "8px";
+    [["soft","Soft shadow"],["hard","Hard shadow"]].forEach(([v,l]) => {
+      const o = el("option","",l); o.value=v; if(v===(p.shadowStyle||"soft")) o.selected=true; shadowStyleSel.appendChild(o);
+    });
+    shadowStyleSel.addEventListener("change", () => { p.shadowStyle = shadowStyleSel.value; renderPhotos(); });
+    sec.appendChild(shadowStyleSel);
     container.appendChild(sec);
 
     sec = el("div", "insp-section");
@@ -1576,9 +1599,18 @@ function arrangePile() {
 
   // ---------------- Export (native Canvas 2D — no external library) ----------------
   const SHADOWS = {
-    soft:   {color:"rgba(0,0,0,0.20)", blur:40, offsetY:15},
-    medium: {color:"rgba(0,0,0,0.32)", blur:70, offsetY:30},
-    strong: {color:"rgba(0,0,0,0.46)", blur:105, offsetY:50},
+    soft:   {
+      soft: {color:"rgba(0,0,0,0.20)", blur:40,  offsetY:15},
+      hard: {color:"rgba(0,0,0,0.30)", blur:8,   offsetY:10},
+    },
+    medium: {
+      soft: {color:"rgba(0,0,0,0.32)", blur:70,  offsetY:30},
+      hard: {color:"rgba(0,0,0,0.40)", blur:13,  offsetY:18},
+    },
+    strong: {
+      soft: {color:"rgba(0,0,0,0.46)", blur:105, offsetY:50},
+      hard: {color:"rgba(0,0,0,0.50)", blur:19,  offsetY:28},
+    },
   };
 
   function loadImageAsync(src){
@@ -1626,7 +1658,8 @@ function arrangePile() {
     ctx.save();
     ctx.translate(p.cx, p.cy);
     ctx.rotate(p.rot * Math.PI / 180);
-    const shadow = SHADOWS[p.shadow] || SHADOWS.medium;
+    const shadowSize = SHADOWS[p.shadow] ? p.shadow : "medium";
+    const shadow = SHADOWS[shadowSize][p.shadowStyle === "hard" ? "hard" : "soft"];
 
     if(p.border === "none"){
       ctx.save();
