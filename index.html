@@ -708,6 +708,82 @@
     return best;
   }
 
+  // Returns whichever packed layout is active — the plain grid, or the centered/hero layout —
+  // so drag-to-swap interactions can work the same way in either mode.
+  function getCurrentGridLayout(){
+    return state.mode === "centered" ? getCenteredLayout() : getGridLayout();
+  }
+
+  // Centered layout: one hero photo at 2x2 cells, other photos packed in the remaining cells
+  // around it (Picasa's "Centered" collage style).
+  function getCenteredLayout(){
+    const n = state.photos.length;
+    if(!n) return null;
+    const pad = state.spacing;
+
+    if(n === 1){
+      const cellW = (state.canvasW - pad * 3) / 2, cellH = (state.canvasH - pad * 3) / 2;
+      return {n:1, pad:pad, cols:2, rows:2, cellW:cellW, cellH:cellH,
+        placements:[{col:0, row:0, colSpan:2, rowSpan:2}], centerIndex:0};
+    }
+
+    const totalUnits = 4 + (n - 1); // hero = 2x2 = 4 units, everyone else 1 unit
+    const cols = Math.max(2, Math.round(Math.sqrt(totalUnits * (state.canvasW / state.canvasH))));
+    const startRows = Math.max(2, Math.ceil(totalUnits / cols));
+    const centerCol = Math.max(0, Math.floor((cols - 2) / 2));
+    const centerRow = Math.max(0, Math.floor((startRows - 2) / 2));
+
+    const occ = [];
+    function ensureRow(r){ while(occ.length <= r) occ.push(new Array(cols).fill(false)); }
+    for(let r = centerRow; r < centerRow + 2; r++){
+      ensureRow(r);
+      for(let c = centerCol; c < centerCol + 2; c++){ occ[r][c] = true; }
+    }
+
+    // The hero is always whichever photo sits at array position 0 — this keeps "who is
+    // centered" consistent with drag-to-swap, which operates on array positions: dragging
+    // a photo onto the hero's slot swaps it into position 0, making it the new hero.
+    const centerIdx = 0;
+
+    const placements = new Array(n);
+    placements[centerIdx] = {col:centerCol, row:centerRow, colSpan:2, rowSpan:2};
+
+    state.photos.forEach((p, i) => {
+      if(i === centerIdx) return;
+      let placed = false;
+      for(let row = 0; !placed && row < 20000; row++){
+        for(let col = 0; col < cols; col++){
+          ensureRow(row);
+          if(!occ[row][col]){
+            occ[row][col] = true;
+            placements[i] = {col:col, row:row, colSpan:1, rowSpan:1};
+            placed = true;
+            break;
+          }
+        }
+      }
+      if(!placed) placements[i] = {col:0, row:0, colSpan:1, rowSpan:1};
+    });
+
+    const rows = Math.max(startRows, occ.length);
+    const cellW = (state.canvasW - pad * (cols + 1)) / cols;
+    const cellH = (state.canvasH - pad * (rows + 1)) / rows;
+    return {n:n, pad:pad, cols:cols, rows:rows, cellW:cellW, cellH:cellH, placements:placements, centerIndex:centerIdx};
+  }
+
+  function arrangeCentered(){
+    const layout = getCenteredLayout();
+    if(!layout) return;
+    state.photos.forEach((p, i) => {
+      const cell = gridCellCenter(layout, i);
+      const ar = p.naturalW / p.naturalH;
+      const sized = boxSizeForCell(cell.cellW, cell.cellH, ar, p.border);
+      p.w = sized.w; p.h = sized.h; p.cx = cell.cx; p.cy = cell.cy; p.rot = 0;
+      p.z = (i === layout.centerIndex) ? layout.n + 1 : i + 1;
+    });
+    state.topZ = layout.n + 2;
+  }
+
   function arrangeGrid(){
     const layout = getGridLayout();
     if(!layout) return;
@@ -725,7 +801,7 @@
   // driving directly, e.g. following the cursor or a resize handle), animating anyone whose
   // cell actually changed. Returns the fresh layout for the caller's own hit-testing.
   function reflowGridExcept(activePhoto){
-    const layout = getGridLayout();
+    const layout = getCurrentGridLayout();
     if(!layout) return layout;
     state.photos.forEach((ph, i) => {
       if(ph === activePhoto) return;
@@ -832,7 +908,9 @@ function arrangePile() {
 */
 
   function arrangeCurrent(){
-    if(state.mode === "grid") arrangeGrid(); else arrangePile();
+    if(state.mode === "grid") arrangeGrid();
+    else if(state.mode === "centered") arrangeCentered();
+    else arrangePile();
     state.manualEdit = false;
   }
 
@@ -951,7 +1029,7 @@ function arrangePile() {
     }, function(){
       state.manualEdit = true;
       if(gridDrag){
-        const layout = getGridLayout();
+        const layout = getCurrentGridLayout();
         const idx = layout ? state.photos.indexOf(p) : -1;
         if(layout && idx !== -1){
           const cell = gridCellCenter(layout, idx);
@@ -973,8 +1051,8 @@ function arrangePile() {
       start = {x:c.x, y:c.y, cx:p.cx, cy:p.cy};
 
       gridDrag = null;
-      if(state.mode === "grid" && state.snapToGrid && state.photos.length > 1){
-        const layout = getGridLayout();
+      if((state.mode === "grid" || state.mode === "centered") && state.snapToGrid && state.photos.length > 1){
+        const layout = getCurrentGridLayout();
         const idx = layout ? state.photos.indexOf(p) : -1;
         if(layout && idx !== -1){
           gridDrag = {layout:layout, currentIndex:idx};
@@ -1207,8 +1285,9 @@ function arrangePile() {
     let sec = el("div", "insp-section");
     sec.appendChild(el("div", "insp-label", "Layout"));
     const seg = el("div", "segmented");
-    ["grid","pile"].forEach(m => {
-      const b = el("button", m === state.mode ? "active" : "", m === "grid" ? "Grid" : "Pile");
+    const MODE_LABELS = {grid:"Grid", centered:"Centered", pile:"Pile"};
+    ["grid","centered","pile"].forEach(m => {
+      const b = el("button", m === state.mode ? "active" : "", MODE_LABELS[m]);
       b.addEventListener("click", () => {
         guardArrangeChange(() => { state.mode = m; arrangeCurrent(); renderAll(); });
       });
@@ -1217,25 +1296,27 @@ function arrangePile() {
     sec.appendChild(seg);
 
     const rearrangeBtn = el("button", "btn primary full-btn",
-      state.mode === "grid" ? "Rearrange" : "Shuffle");
+      state.mode === "pile" ? "Shuffle" : "Rearrange");
     rearrangeBtn.addEventListener("click", () => {
       guardArrangeChange(() => { arrangeCurrent(); renderPhotos(); });
     });
     sec.appendChild(rearrangeBtn);
 
-    if(state.mode === "grid"){
+    if(state.mode === "grid" || state.mode === "centered"){
       const snapRow = el("label", "check-row"); snapRow.style.marginTop = "12px";
       const snapCheckbox = el("input"); snapCheckbox.type = "checkbox"; snapCheckbox.checked = state.snapToGrid;
       snapCheckbox.addEventListener("change", () => { state.snapToGrid = snapCheckbox.checked; });
       snapRow.appendChild(snapCheckbox);
-      snapRow.appendChild(document.createTextNode("Snap to grid (drag to swap / resize to span 2 cells)"));
+      snapRow.appendChild(document.createTextNode(
+        state.mode === "grid" ? "Snap to grid (drag to swap / resize to span 2 cells)" : "Snap to grid (drag to swap)"
+      ));
       sec.appendChild(snapRow);
     }
     container.appendChild(sec);
 
     // Spacing / randomness
     sec = el("div", "insp-section");
-    if(state.mode === "grid"){
+    if(state.mode === "grid" || state.mode === "centered"){
       sec.appendChild(el("div", "insp-label", "Spacing"));
       const row = el("div", "row");
       row.appendChild(el("label", "", "Gap between photos"));
@@ -1245,7 +1326,7 @@ function arrangePile() {
       range.addEventListener("input", () => {
         state.spacing = +range.value;
         row.querySelector(".val").textContent = state.spacing + "px";
-        arrangeGrid(); renderPhotos();
+        arrangeCurrent(); renderPhotos();
       });
       sec.appendChild(range);
     } else {
@@ -1400,6 +1481,20 @@ function arrangePile() {
     meta.innerHTML = "Selected photo<br>" + Math.round(p.w) + " \u00d7 " + Math.round(p.h) + "px";
     preview.appendChild(meta);
     container.appendChild(preview);
+
+    if(state.mode === "centered" && state.photos.length > 1){
+      const centerSec = el("div", "insp-section");
+      const isCenter = state.photos[0] === p;
+      const centerBtn = el("button", "btn full-btn", isCenter ? "This is the center photo" : "Make Center Photo");
+      centerBtn.disabled = isCenter;
+      centerBtn.addEventListener("click", () => {
+        state.photos = [p, ...state.photos.filter(ph => ph !== p)];
+        arrangeCurrent();
+        renderAll();
+      });
+      centerSec.appendChild(centerBtn);
+      container.appendChild(centerSec);
+    }
 
     let sec = el("div", "insp-section");
     sec.appendChild(el("div", "insp-label", "Border"));
