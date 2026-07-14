@@ -85,7 +85,9 @@
   .empty-state span{font-size:16px;max-width:300px;line-height:1.45;}
 
   /* ---------- Photos ---------- */
-  .photo{position:absolute;top:0;left:0;cursor:grab;touch-action:none;}
+  .photo{position:absolute;top:0;left:0;cursor:grab;touch-action:none;
+    will-change:transform;backface-visibility:hidden;transform-style:preserve-3d;}
+  .photo.swap-move{transition:left .15s ease, top .15s ease;}
   .photo:active{cursor:grabbing;}
   .frame{position:absolute;inset:0;box-sizing:border-box;display:flex;}
   .frame img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;user-select:none;
@@ -179,15 +181,15 @@
 
   /* ---------- Filmstrip ---------- */
   #filmstripBar{
-    flex:0 0 92px;position:relative;transition:flex-basis .2s ease;
+    flex:0 0 92px;min-height:0;position:relative;transition:flex-basis .2s ease;
   }
   #filmstripBar.collapsed{flex-basis:0;}
   #filmstrip{
-    position:relative;height:100%;background:#100E0D;border-top:1px solid var(--control-border);
+    position:relative;height:100%;min-height:0;background:#100E0D;border-top:1px solid var(--control-border);
     display:flex;align-items:center;gap:10px;padding:0 18px;overflow-x:auto;overflow-y:hidden;
     transition:opacity .15s ease;
   }
-  #filmstripBar.collapsed #filmstrip{opacity:0;pointer-events:none;}
+  #filmstripBar.collapsed #filmstrip{opacity:0;pointer-events:none;border-top-color:transparent;}
   .filmstrip-toggle{
     position:absolute;top:-13px;left:50%;transform:translateX(-50%);
     width:36px;height:13px;padding:0;border:1px solid var(--control-border);border-bottom:none;
@@ -286,7 +288,9 @@
   #app.theme-classic input[type=range]::-webkit-slider-thumb{border:2px solid #EFEFEF;}
   #app.theme-classic .brand{color:#2B2B2B;}
   #app.theme-classic .brand svg{color:#3E7FC7;}
-  #app.theme-classic .modal-box{background:#EFEFEF;border-color:#ACACAC;color:#2B2B2B;}
+  #app.theme-classic .modal-box{
+    background:linear-gradient(to bottom, #F7F7F7 0%, #E4E4E4 100%);border-color:#ACACAC;color:#2B2B2B;
+    box-shadow:0 30px 70px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.6);}
   #app.theme-classic .modal-img-wrap{background:#111;}
   #app.theme-classic .film-thumb{border-color:transparent;}
   #app.theme-classic ::-webkit-scrollbar-thumb{background:#B0B0B0;}
@@ -613,24 +617,41 @@
   }
 
   // ---------------- Layout algorithms ----------------
-  function arrangeGrid(){
+  function getGridLayout(){
     const n = state.photos.length;
-    if(!n) return;
+    if(!n) return null;
     const pad = state.spacing;
     const cols = Math.max(1, Math.round(Math.sqrt(n * (state.canvasW / state.canvasH))));
     const rows = Math.ceil(n / cols);
     const cellW = (state.canvasW - pad * (cols + 1)) / cols;
     const cellH = (state.canvasH - pad * (rows + 1)) / rows;
+    return {n:n, pad:pad, cols:cols, rows:rows, cellW:cellW, cellH:cellH};
+  }
+  function gridCellCenter(layout, index){
+    const col = index % layout.cols, row = Math.floor(index / layout.cols);
+    return {
+      cx: layout.pad + col * (layout.cellW + layout.pad) + layout.cellW / 2,
+      cy: layout.pad + row * (layout.cellH + layout.pad) + layout.cellH / 2,
+    };
+  }
+  // Which grid cell index a canvas-space point falls in (clamped to a valid, occupied cell).
+  function gridIndexAt(layout, x, y){
+    const col = clamp(Math.round((x - layout.pad - layout.cellW / 2) / (layout.cellW + layout.pad)), 0, layout.cols - 1);
+    const row = clamp(Math.round((y - layout.pad - layout.cellH / 2) / (layout.cellH + layout.pad)), 0, layout.rows - 1);
+    return Math.min(row * layout.cols + col, layout.n - 1);
+  }
+
+  function arrangeGrid(){
+    const layout = getGridLayout();
+    if(!layout) return;
     state.photos.forEach((p, i) => {
-      const col = i % cols, row = Math.floor(i / cols);
-      const cellCx = pad + col * (cellW + pad) + cellW / 2;
-      const cellCy = pad + row * (cellH + pad) + cellH / 2;
+      const center = gridCellCenter(layout, i);
       const ar = p.naturalW / p.naturalH;
-      const sized = boxSizeForCell(cellW, cellH, ar, p.border);
-      p.w = sized.w; p.h = sized.h; p.cx = cellCx; p.cy = cellCy; p.rot = 0;
+      const sized = boxSizeForCell(layout.cellW, layout.cellH, ar, p.border);
+      p.w = sized.w; p.h = sized.h; p.cx = center.cx; p.cy = center.cy; p.rot = 0;
       p.z = i + 1;
     });
-    state.topZ = n + 1;
+    state.topZ = layout.n + 1;
   }
 
 function arrangePile() {
@@ -787,6 +808,15 @@ function arrangePile() {
     el.style.zIndex = p.z;
   }
 
+  // Moves a *displaced* photo (not the one being actively dragged) into its new cell with a
+  // brief, self-clearing transition, so a grid swap-preview animates instead of teleporting.
+  function animateSwapMove(el, p){
+    el.classList.add("swap-move");
+    positionPhotoEl(el, p);
+    window.clearTimeout(el._swapMoveTimer);
+    el._swapMoveTimer = window.setTimeout(function(){ el.classList.remove("swap-move"); }, 180);
+  }
+
   // ---------------- Interaction ----------------
   function beginPointerDrag(el, onMove, onEnd){
     return function(e){
@@ -807,13 +837,42 @@ function arrangePile() {
 
   function wirePhotoEvents(el, p, frame, del, rotateH, resizeH){
     // Move
+    let start = {};
+    let gridDrag = null; // active only while dragging in grid mode with 2+ photos
+
     frame.addEventListener("pointerdown", beginPointerDrag(el, function(ev){
       const cur = clientToCanvas(ev.clientX, ev.clientY);
       p.cx = start.cx + (cur.x - start.x);
       p.cy = start.cy + (cur.y - start.y);
       positionPhotoEl(el, p);
-    }, function(){ state.manualEdit = true; }));
-    let start = {};
+
+      if(gridDrag){
+        const hovered = gridIndexAt(gridDrag.layout, p.cx, p.cy);
+        if(hovered !== gridDrag.vacatedIndex){
+          const occupant = gridDrag.order[hovered];
+          if(occupant && occupant !== p){
+            const target = gridCellCenter(gridDrag.layout, gridDrag.vacatedIndex);
+            occupant.cx = target.cx; occupant.cy = target.cy; occupant.rot = 0;
+            const occupantEl = canvasEl.querySelector('.photo[data-id="' + occupant.id + '"]');
+            if(occupantEl) animateSwapMove(occupantEl, occupant);
+            gridDrag.order[gridDrag.vacatedIndex] = occupant;
+            gridDrag.order[hovered] = p;
+            gridDrag.vacatedIndex = hovered;
+          }
+        }
+      }
+    }, function(){
+      state.manualEdit = true;
+      if(gridDrag){
+        const target = gridCellCenter(gridDrag.layout, gridDrag.vacatedIndex);
+        p.cx = target.cx; p.cy = target.cy; p.rot = 0;
+        positionPhotoEl(el, p);
+        gridDrag.order[gridDrag.vacatedIndex] = p;
+        state.photos = gridDrag.order;
+        gridDrag = null;
+        renderFilmstrip();
+      }
+    }));
     frame.addEventListener("pointerdown", function(ev){
       selectPhoto(p.id);
       bringToFront(p);
@@ -821,6 +880,16 @@ function arrangePile() {
       el.classList.add("lifted");
       const c = clientToCanvas(ev.clientX, ev.clientY);
       start = {x:c.x, y:c.y, cx:p.cx, cy:p.cy};
+
+      gridDrag = null;
+      if(state.mode === "grid" && state.photos.length > 1){
+        const layout = getGridLayout();
+        const idx = layout ? state.photos.indexOf(p) : -1;
+        if(layout && idx !== -1){
+          gridDrag = {layout:layout, vacatedIndex:idx, order:state.photos.slice()};
+        }
+      }
+
       const releaseLift = function(){ el.classList.remove("lifted"); el.removeEventListener("pointerup", releaseLift); };
       el.addEventListener("pointerup", releaseLift);
     });
@@ -1367,26 +1436,37 @@ function arrangePile() {
   }
 
   async function buildExportCanvas(){
+    // Supersample (render bigger, then downscale) for real anti-aliasing on rotated edges.
+    // Capped so the working bitmap never balloons past a size that mobile browsers
+    // (iOS Safari in particular) can choke on for a single canvas.
+    const MAX_SS_PIXELS = 24000000;
+    const basePixels = state.canvasW * state.canvasH;
+    let ssaa = Math.sqrt(MAX_SS_PIXELS / basePixels);
+    ssaa = Math.min(2, Math.max(1, ssaa));
+
     const canvas = document.createElement("canvas");
-    canvas.width = state.canvasW;
-    canvas.height = state.canvasH;
+    canvas.width = Math.round(state.canvasW * ssaa);
+    canvas.height = Math.round(state.canvasH * ssaa);
     const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.scale(ssaa, ssaa);
 
     if(state.backgroundMode === "image" && state.backgroundImage){
       const bgImg = await loadImageAsync(state.backgroundImage);
       if(state.backgroundFit === "tile"){
         const pattern = ctx.createPattern(bgImg, "repeat");
         ctx.fillStyle = pattern;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, state.canvasW, state.canvasH);
       } else {
-        drawCover(ctx, bgImg, 0, 0, canvas.width, canvas.height);
+        drawCover(ctx, bgImg, 0, 0, state.canvasW, state.canvasH);
       }
     } else {
       ctx.fillStyle = state.background;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, state.canvasW, state.canvasH);
     }
 
-    if(state.textured) drawTexture(ctx, canvas.width, canvas.height);
+    if(state.textured) drawTexture(ctx, state.canvasW, state.canvasH);
 
     const sorted = [...state.photos].sort((a,b) => a.z - b.z);
     sorted.forEach(p => {
@@ -1394,7 +1474,16 @@ function arrangePile() {
       if(imgEl) drawPhotoToCanvas(ctx, p, imgEl);
     });
 
-    return canvas;
+    if(ssaa === 1) return canvas;
+
+    const finalCanvas = document.createElement("canvas");
+    finalCanvas.width = state.canvasW;
+    finalCanvas.height = state.canvasH;
+    const fctx = finalCanvas.getContext("2d");
+    fctx.imageSmoothingEnabled = true;
+    fctx.imageSmoothingQuality = "high";
+    fctx.drawImage(canvas, 0, 0, finalCanvas.width, finalCanvas.height);
+    return finalCanvas;
   }
 
   let currentExportUrl = null;
@@ -1459,12 +1548,11 @@ function arrangePile() {
   function loadPrefsFromCookies(){
     const theme = getCookie("collasa_theme");
     if(theme === "dark"){
-      appEl.classList.remove("theme-classic");
       appEl.classList.add("theme-dark");
       themeToggleBtn.classList.add("primary");
-    } else if(theme === "classic"){
+    } else {
       appEl.classList.remove("theme-dark");
-      appEl.classList.add("theme-classic");
+      themeToggleBtn.classList.remove("primary");
     }
 
     const fmt = getCookie("collasa_export_format");
