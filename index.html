@@ -191,7 +191,7 @@
   }
   #filmstripBar.collapsed #filmstrip{opacity:0;pointer-events:none;border-top-color:transparent;}
   .filmstrip-toggle{
-    position:absolute;top:-13px;left:50%;transform:translateX(-50%);
+    position:absolute;top:-13px;left:296px;
     width:36px;height:13px;padding:0;border:1px solid var(--control-border);border-bottom:none;
     border-radius:8px 8px 0 0;background:var(--control);color:var(--muted);
     display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:6;
@@ -402,33 +402,33 @@
     <div id="filmstrip"></div>
   </div>
 
+  <div class="modal-overlay" id="exportModal">
+    <div class="modal-box">
+      <h3>Your collage is ready</h3>
+      <div class="modal-img-wrap"><img id="exportPreviewImg" alt="Exported collage"></div>
+      <p class="modal-hint">On iPhone or iPad: press and hold the image above, then choose <strong>Save Image</strong>. On a computer, use Download.</p>
+      <div class="modal-actions">
+        <button class="btn" id="modalCloseBtn" type="button">Close</button>
+        <a class="btn primary" id="modalDownloadLink" download>Download</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="confirmModal">
+    <div class="modal-box">
+      <h3 id="confirmTitle">Are you sure?</h3>
+      <p class="modal-hint" id="confirmMessage"></p>
+      <div class="modal-actions">
+        <button class="btn" id="confirmCancelBtn" type="button">Cancel</button>
+        <button class="btn primary" id="confirmOkBtn" type="button">Yes, continue</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <input type="file" id="fileInput" multiple accept="image/*">
 <input type="file" id="bgFileInput" accept="image/*">
-
-<div class="modal-overlay" id="exportModal">
-  <div class="modal-box">
-    <h3>Your collage is ready</h3>
-    <div class="modal-img-wrap"><img id="exportPreviewImg" alt="Exported collage"></div>
-    <p class="modal-hint">On iPhone or iPad: press and hold the image above, then choose <strong>Save Image</strong>. On a computer, use Download.</p>
-    <div class="modal-actions">
-      <button class="btn" id="modalCloseBtn" type="button">Close</button>
-      <a class="btn primary" id="modalDownloadLink" download>Download</a>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="confirmModal">
-  <div class="modal-box">
-    <h3 id="confirmTitle">Are you sure?</h3>
-    <p class="modal-hint" id="confirmMessage"></p>
-    <div class="modal-actions">
-      <button class="btn" id="confirmCancelBtn" type="button">Cancel</button>
-      <button class="btn primary" id="confirmOkBtn" type="button">Yes, continue</button>
-    </div>
-  </div>
-</div>
 
 <script>
 (function(){
@@ -468,6 +468,7 @@
     scale: 1,
     nextId: 1,
     manualEdit: false,   // true once the user has dragged/resized/rotated a photo since the last arrange
+    snapToGrid: true,    // when true, grid-mode drags swap photos and resizes snap to a 1x/2x cell span
   };
 
   // ---------------- DOM refs ----------------
@@ -617,41 +618,129 @@
   }
 
   // ---------------- Layout algorithms ----------------
+  // A photo normally occupies a single grid cell. Portrait photos can span 2 cells
+  // vertically (taller), landscape photos can span 2 cells horizontally (wider) —
+  // whichever direction actually suits their own aspect ratio.
+  function getPhotoSpan(p){
+    if(p.gridSpan !== 2) return {cols:1, rows:1};
+    const ar = p.naturalW / p.naturalH;
+    return ar < 1 ? {cols:1, rows:2} : {cols:2, rows:1};
+  }
+
+  // Simple greedy row-major bin packer: places each item (in array order) into the first
+  // free footprint it fits in, growing rows as needed. Mirrors how a masonry/spanning grid
+  // (à la Pinterest boards) lays things out.
+  function packGrid(cols, items){
+    const occ = [];
+    function ensureRow(r){ while(occ.length <= r) occ.push(new Array(cols).fill(false)); }
+    function fits(col, row, cSpan, rSpan){
+      if(col + cSpan > cols) return false;
+      for(let r = row; r < row + rSpan; r++){
+        ensureRow(r);
+        for(let c = col; c < col + cSpan; c++){ if(occ[r][c]) return false; }
+      }
+      return true;
+    }
+    function occupy(col, row, cSpan, rSpan){
+      for(let r = row; r < row + rSpan; r++){
+        ensureRow(r);
+        for(let c = col; c < col + cSpan; c++){ occ[r][c] = true; }
+      }
+    }
+    const placements = [];
+    items.forEach(item => {
+      let placed = false;
+      for(let row = 0; !placed && row < 20000; row++){
+        for(let col = 0; col <= cols - item.cols; col++){
+          if(fits(col, row, item.cols, item.rows)){
+            occupy(col, row, item.cols, item.rows);
+            placements.push({col:col, row:row, colSpan:item.cols, rowSpan:item.rows});
+            placed = true;
+            break;
+          }
+        }
+      }
+      if(!placed) placements.push({col:0, row:0, colSpan:1, rowSpan:1});
+    });
+    return {placements:placements, totalRows:occ.length};
+  }
+
   function getGridLayout(){
     const n = state.photos.length;
     if(!n) return null;
     const pad = state.spacing;
-    const cols = Math.max(1, Math.round(Math.sqrt(n * (state.canvasW / state.canvasH))));
-    const rows = Math.ceil(n / cols);
+    const items = state.photos.map(p => getPhotoSpan(p));
+    const totalUnits = items.reduce((s,it) => s + it.cols * it.rows, 0);
+    const cols = Math.max(1, Math.round(Math.sqrt(totalUnits * (state.canvasW / state.canvasH))));
+    const packed = packGrid(cols, items);
+    const rows = Math.max(1, packed.totalRows);
     const cellW = (state.canvasW - pad * (cols + 1)) / cols;
     const cellH = (state.canvasH - pad * (rows + 1)) / rows;
-    return {n:n, pad:pad, cols:cols, rows:rows, cellW:cellW, cellH:cellH};
+    return {n:n, pad:pad, cols:cols, rows:rows, cellW:cellW, cellH:cellH, placements:packed.placements};
   }
+
+  // Returns the pixel center + effective (possibly spanned) footprint size for a photo's index.
   function gridCellCenter(layout, index){
-    const col = index % layout.cols, row = Math.floor(index / layout.cols);
-    return {
-      cx: layout.pad + col * (layout.cellW + layout.pad) + layout.cellW / 2,
-      cy: layout.pad + row * (layout.cellH + layout.pad) + layout.cellH / 2,
-    };
+    const pl = layout.placements[index];
+    if(!pl) return {cx:state.canvasW/2, cy:state.canvasH/2, cellW:layout.cellW, cellH:layout.cellH};
+    const spanW = pl.colSpan * layout.cellW + (pl.colSpan - 1) * layout.pad;
+    const spanH = pl.rowSpan * layout.cellH + (pl.rowSpan - 1) * layout.pad;
+    const leftX = layout.pad + pl.col * (layout.cellW + layout.pad);
+    const topY = layout.pad + pl.row * (layout.cellH + layout.pad);
+    return {cx:leftX + spanW / 2, cy:topY + spanH / 2, cellW:spanW, cellH:spanH};
   }
-  // Which grid cell index a canvas-space point falls in (clamped to a valid, occupied cell).
+
+  // Which placement (photo index) a canvas-space point falls in — used for drag-to-swap hit testing.
   function gridIndexAt(layout, x, y){
     const col = clamp(Math.round((x - layout.pad - layout.cellW / 2) / (layout.cellW + layout.pad)), 0, layout.cols - 1);
     const row = clamp(Math.round((y - layout.pad - layout.cellH / 2) / (layout.cellH + layout.pad)), 0, layout.rows - 1);
-    return Math.min(row * layout.cols + col, layout.n - 1);
+    let best = -1;
+    layout.placements.forEach((pl, i) => {
+      if(col >= pl.col && col < pl.col + pl.colSpan && row >= pl.row && row < pl.row + pl.rowSpan) best = i;
+    });
+    if(best !== -1) return best;
+    let bestDist = Infinity;
+    layout.placements.forEach((pl, i) => {
+      const c = gridCellCenter(layout, i);
+      const d = Math.hypot(x - c.cx, y - c.cy);
+      if(d < bestDist){ bestDist = d; best = i; }
+    });
+    return best;
   }
 
   function arrangeGrid(){
     const layout = getGridLayout();
     if(!layout) return;
     state.photos.forEach((p, i) => {
-      const center = gridCellCenter(layout, i);
+      const cell = gridCellCenter(layout, i);
       const ar = p.naturalW / p.naturalH;
-      const sized = boxSizeForCell(layout.cellW, layout.cellH, ar, p.border);
-      p.w = sized.w; p.h = sized.h; p.cx = center.cx; p.cy = center.cy; p.rot = 0;
+      const sized = boxSizeForCell(cell.cellW, cell.cellH, ar, p.border);
+      p.w = sized.w; p.h = sized.h; p.cx = cell.cx; p.cy = cell.cy; p.rot = 0;
       p.z = i + 1;
     });
     state.topZ = layout.n + 1;
+  }
+
+  // Re-lays-out everyone in grid mode EXCEPT `activePhoto` (whose position/size the caller is
+  // driving directly, e.g. following the cursor or a resize handle), animating anyone whose
+  // cell actually changed. Returns the fresh layout for the caller's own hit-testing.
+  function reflowGridExcept(activePhoto){
+    const layout = getGridLayout();
+    if(!layout) return layout;
+    state.photos.forEach((ph, i) => {
+      if(ph === activePhoto) return;
+      const cell = gridCellCenter(layout, i);
+      const ar = ph.naturalW / ph.naturalH;
+      const sized = boxSizeForCell(cell.cellW, cell.cellH, ar, ph.border);
+      const changed = Math.round(ph.cx) !== Math.round(cell.cx) || Math.round(ph.cy) !== Math.round(cell.cy) ||
+                      Math.round(ph.w) !== Math.round(sized.w) || Math.round(ph.h) !== Math.round(sized.h);
+      ph.w = sized.w; ph.h = sized.h; ph.cx = cell.cx; ph.cy = cell.cy; ph.rot = 0;
+      if(changed){
+        const phEl = canvasEl.querySelector('.photo[data-id="' + ph.id + '"]');
+        if(phEl) animateSwapMove(phEl, ph);
+      }
+    });
+    return layout;
   }
 
 function arrangePile() {
@@ -848,27 +937,29 @@ function arrangePile() {
 
       if(gridDrag){
         const hovered = gridIndexAt(gridDrag.layout, p.cx, p.cy);
-        if(hovered !== gridDrag.vacatedIndex){
-          const occupant = gridDrag.order[hovered];
-          if(occupant && occupant !== p){
-            const target = gridCellCenter(gridDrag.layout, gridDrag.vacatedIndex);
-            occupant.cx = target.cx; occupant.cy = target.cy; occupant.rot = 0;
-            const occupantEl = canvasEl.querySelector('.photo[data-id="' + occupant.id + '"]');
-            if(occupantEl) animateSwapMove(occupantEl, occupant);
-            gridDrag.order[gridDrag.vacatedIndex] = occupant;
-            gridDrag.order[hovered] = p;
-            gridDrag.vacatedIndex = hovered;
-          }
+        if(hovered !== -1 && hovered !== gridDrag.currentIndex){
+          const order = state.photos;
+          const tmp = order[gridDrag.currentIndex];
+          order[gridDrag.currentIndex] = order[hovered];
+          order[hovered] = tmp;
+          gridDrag.currentIndex = hovered;
+          // Swapping array slots can ripple through the whole pack when spans are involved
+          // (not just a clean 2-item swap), so re-run the packer and animate whoever moved.
+          gridDrag.layout = reflowGridExcept(p);
         }
       }
     }, function(){
       state.manualEdit = true;
       if(gridDrag){
-        const target = gridCellCenter(gridDrag.layout, gridDrag.vacatedIndex);
-        p.cx = target.cx; p.cy = target.cy; p.rot = 0;
-        positionPhotoEl(el, p);
-        gridDrag.order[gridDrag.vacatedIndex] = p;
-        state.photos = gridDrag.order;
+        const layout = getGridLayout();
+        const idx = layout ? state.photos.indexOf(p) : -1;
+        if(layout && idx !== -1){
+          const cell = gridCellCenter(layout, idx);
+          const ar = p.naturalW / p.naturalH;
+          const sized = boxSizeForCell(cell.cellW, cell.cellH, ar, p.border);
+          p.w = sized.w; p.h = sized.h; p.cx = cell.cx; p.cy = cell.cy; p.rot = 0;
+          positionPhotoEl(el, p);
+        }
         gridDrag = null;
         renderFilmstrip();
       }
@@ -882,11 +973,11 @@ function arrangePile() {
       start = {x:c.x, y:c.y, cx:p.cx, cy:p.cy};
 
       gridDrag = null;
-      if(state.mode === "grid" && state.photos.length > 1){
+      if(state.mode === "grid" && state.snapToGrid && state.photos.length > 1){
         const layout = getGridLayout();
         const idx = layout ? state.photos.indexOf(p) : -1;
         if(layout && idx !== -1){
-          gridDrag = {layout:layout, vacatedIndex:idx, order:state.photos.slice()};
+          gridDrag = {layout:layout, currentIndex:idx};
         }
       }
 
@@ -894,7 +985,10 @@ function arrangePile() {
       el.addEventListener("pointerup", releaseLift);
     });
 
-    // Resize
+    // Resize. In grid mode (with snapping on), dragging the handle out past a threshold
+    // toggles the photo between a normal single cell and a 2x span (vertical for portrait
+    // photos, horizontal for landscape), reflowing the rest of the grid to make room —
+    // rather than free-scaling the photo past the edges of its cell.
     resizeH.addEventListener("pointerdown", beginPointerDrag(resizeH, function(ev){
       const c = clientToCanvas(ev.clientX, ev.clientY);
       const rad = -p.rot * Math.PI / 180;
@@ -903,10 +997,28 @@ function arrangePile() {
       const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
       const dist = Math.hypot(localX, localY);
       const startDist = Math.hypot(rstart.hw, rstart.hh);
-      const scaleF = clamp(dist / startDist, 0.15, 8);
-      p.w = rstart.w * scaleF;
-      p.h = rstart.h * scaleF;
-      positionPhotoEl(el, p);
+
+      if(state.mode === "grid" && state.snapToGrid){
+        const desiredSpan = dist > startDist * 1.35 ? 2 : 1;
+        if(desiredSpan !== p.gridSpan){
+          p.gridSpan = desiredSpan;
+          reflowGridExcept(p);
+        }
+        const layout = getGridLayout();
+        const idx = layout ? state.photos.indexOf(p) : -1;
+        if(layout && idx !== -1){
+          const cell = gridCellCenter(layout, idx);
+          const ar = p.naturalW / p.naturalH;
+          const sized = boxSizeForCell(cell.cellW, cell.cellH, ar, p.border);
+          p.w = sized.w; p.h = sized.h; p.cx = cell.cx; p.cy = cell.cy;
+          positionPhotoEl(el, p);
+        }
+      } else {
+        const scaleF = clamp(dist / startDist, 0.15, 8);
+        p.w = rstart.w * scaleF;
+        p.h = rstart.h * scaleF;
+        positionPhotoEl(el, p);
+      }
     }, function(){ state.manualEdit = true; renderInspector(); }));
     let rstart = {};
     resizeH.addEventListener("pointerdown", function(){
@@ -1000,6 +1112,7 @@ function arrangePile() {
             rot: 0, z: ++state.topZ,
             border: state.defaultBorder,
             shadow: state.defaultShadow,
+            gridSpan: 1,
           });
         };
         img.onerror = function(){ resolve(null); };
@@ -1109,6 +1222,15 @@ function arrangePile() {
       guardArrangeChange(() => { arrangeCurrent(); renderPhotos(); });
     });
     sec.appendChild(rearrangeBtn);
+
+    if(state.mode === "grid"){
+      const snapRow = el("label", "check-row"); snapRow.style.marginTop = "12px";
+      const snapCheckbox = el("input"); snapCheckbox.type = "checkbox"; snapCheckbox.checked = state.snapToGrid;
+      snapCheckbox.addEventListener("change", () => { state.snapToGrid = snapCheckbox.checked; });
+      snapRow.appendChild(snapCheckbox);
+      snapRow.appendChild(document.createTextNode("Snap to grid (drag to swap / resize to span 2 cells)"));
+      sec.appendChild(snapRow);
+    }
     container.appendChild(sec);
 
     // Spacing / randomness
